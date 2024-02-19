@@ -32,13 +32,17 @@ parser$add_argument("-v", "--version", action="version", version=paste0("SamnSor
     help="Print version information")
 args <- parser$parse_args()
 
-# helper func for running shell cmds
-shell <- function(command, echo = F) {
+# helper func for running sh cmds
+sh <- function(command, echo = F) {
     if (echo) {
-        system(command)
         cat(command, "\n")
+        ec <- system(command)
     } else {
-        system(command)
+        ec <- system(command)
+    }
+    if (ec != 0) {
+        cat("\nNonzero exit code detected: check the log for error messages.\n")
+        q(status = ec)
     }
 }
 
@@ -64,11 +68,11 @@ check_args <- function(args=NULL) {
         tmpdir <<- file.path(args$tmpdir, hash)
     }
     cat("Created temporary file directory at:", tmpdir, "\n")
-    shell(paste('mkdir -p', tmpdir))
+    sh(paste('mkdir -p', tmpdir))
     # archive logs in outdir
     logdir <<- file.path(args$outdir, "logs")
     cat("Analysis logs are saved to:", logdir, "\n")
-    shell(paste('mkdir -p', logdir))
+    sh(paste('mkdir -p', logdir))
 
 }
 
@@ -78,23 +82,25 @@ input_setup <- function (
     tmpdir = NULL # tmp directory path where to run analysis
 ) { 
     cat("Setting up analysis input directory...\n")
-    shell(paste('mkdir -p', file.path(tmpdir, "input")))
+    sh(paste('mkdir -p', file.path(tmpdir, "input")))
     walk(file, function(f) {
         realpath <- file.path(normalizePath(f))
         cmd <- paste("ln -s", realpath, file.path(tmpdir, "input", basename(realpath)))
-        shell(cmd, echo = T)
+        sh(cmd, echo = T)
     })
 }
 
 # cgMLST with ChewBBACA
 cgmlst <- function(
-    tmpdir = NULL,
-    logdir = NULL,
-    outdir = NULL,
-    threads = 4
+    tmpdir = NULL, # tmp directory path where to run analysis
+    logdir = NULL, # log directory path for storing stdout and stderr
+    outdir = NULL, # output dir
+    threads = 4    # number of threads
 ) {
     cat("Running cgMLST...\n")
-    cmd <- paste("chewBBACA.py AlleleCall",
+    cmd <- paste(
+    "chewBBACA.py",
+    "AlleleCall",
     "-i", file.path(tmpdir, "input"),
     "-g $REF_PATH",
     "--ptf $TRAINING_PATH",
@@ -103,32 +109,32 @@ cgmlst <- function(
     "--cpu", threads,
     "--no-inferred",
     ">", file.path(logdir, "chewBBACA.log"), "2>&1") # save log to file
-    shell(cmd, echo = T)
+    sh(cmd, echo = T)
     
     # publish hashed and unhashed profiles in outdir
     cat("Publishing cgMLST results...\n")
     cmd <- paste("cp -r", file.path(tmpdir, "cgmlst"),
                  outdir)
-    shell(cmd, echo = T)
+    sh(cmd, echo = T)
 }
 
 # calculate query distance in respect to references
 cgmlst_dist_query <- function(
-    tmpdir = NULL,
-    logdir = NULL,
-    outdir = NULL
+    tmpdir = NULL, # tmp directory path where to run analysis
+    logdir = NULL, # log directory path for storing stdout and stderr
+    outdir = NULL # output dir
 ) {
     cat("Calculating allelic distance between query and reference...\n")
-    cmd <- paste("$CGMLST_DISTS -H", 
+    cmd <- paste("$CGMLST_DISTS", "-H", 
                  "$REF_ALLELES", # reference profiles
                  file.path(tmpdir, "cgmlst", "results_alleles_hashed.tsv"), # query profiles
                  ">", file.path(tmpdir, "cgmlst_dist.tsv")) # output distance matrix
-    shell(cmd, echo = T)
+    sh(cmd, echo = T)
     # reformat distance matrix
-    dist <- fread(file.path(tmpdir, "cgmlst_dist.tsv"))
+    dist <- fread(file.path(tmpdir, "cgmlst_dist.tsv"), sep = "\t")
     dist_out <<- dist %>% column_to_rownames("cgmlst-dists")
-    rownames(dist_out) <- str_replace_all(rownames(dist_out), "\\.1|\\.2", "")
-    colnames(dist_out) <- str_replace_all(colnames(dist_out), "\\.1|\\.2", "")
+    #rownames(dist_out) <- str_replace_all(rownames(dist_out), "\\.1|\\.2", "")
+    #colnames(dist_out) <- str_replace_all(colnames(dist_out), "\\.1|\\.2", "")
     write.table(dist_out, file.path(outdir, "cgmlst_dist.tsv"),
                 sep = "\t", quote = F, row.names = T, col.names = NA)
 
@@ -136,11 +142,11 @@ cgmlst_dist_query <- function(
 
 # best hit search
 bh_search <- function(
-    tmpdir = NULL,
-    outdir = NULL) {
+    tmpdir = NULL # tmp directory path where to run analysis
+) {
         cat("Identifying best hit...\n")
         bh <- apply(dist_out, 1, function(x) { names(which(x == min(x)))[1] })
-        bh_res <- data.frame("id" = names(bh),
+        bh_res <<- data.frame("id" = names(bh),
                              "best_hit" = bh)
         write.table(bh_res, file.path(tmpdir, "best_hit.tsv"),
                     sep = "\t", row.names = F, quote = F)
@@ -149,11 +155,12 @@ bh_search <- function(
 
 # main search 
 search <- function(
-    tmpdir = NULL,
-    outdir = NULL) {
+    tmpdir = NULL, # tmp directory path where to run analysis
+    outdir = NULL # output dir
+) {
 
         # run best hit
-        bh_search(tmpdir, outdir)
+        bh_search(tmpdir)
 }
 
 # main workflow
