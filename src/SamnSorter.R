@@ -17,6 +17,24 @@ version <- tryCatch(
     }
 )
 
+# workflow metadata class
+setClass("Workflow metadata", 
+         slots=list(
+            tmpdir="character", 
+            logdir="character", 
+            outdir="character",
+            args="list"
+        )
+)
+
+# S4 generics
+invisible(setGeneric("input_setup", function(meta, args) standardGeneric("input_setup")))
+invisible(setGeneric("cgmlst", function(meta, args) standardGeneric("cgmlst")))
+invisible(setGeneric("cgmlst_dist_query", function(meta, args) standardGeneric("cgmlst_dist_query")))
+invisible(setGeneric("main_search", function(meta, args) standardGeneric("main_search")))
+invisible(setGeneric("pp_search", function(meta, args) standardGeneric("pp_search")))
+invisible(setGeneric("bh_search", function(meta, args) standardGeneric("bh_search")))
+
 # cli argument parser
 parser <- ArgumentParser()
 parser$add_argument("file", nargs='+')
@@ -59,158 +77,167 @@ check_args <- function(args=NULL) {
     # set up tmpdir
     hash <- digest(Sys.time(), algo='crc32')
     if (nchar(args$tmpdir) == 0) {
-        tmpdir <<- file.path(args$outdir, hash) 
+        wf_meta@tmpdir <- file.path(args$outdir, hash) 
     } else {
         if (!file.exists(args$tmpdir)) { 
             message(args$tmpdir, " does not exist, please verify the directory path")
             q(status = 1)
         }
-        tmpdir <<- file.path(args$tmpdir, hash)
+        wf_meta@tmpdir <- file.path(args$tmpdir, hash)
     }
-    cat("Created temporary file directory at:", tmpdir, "\n")
-    sh(paste('mkdir -p', tmpdir))
+    cat("Created temporary file directory at:", wf_meta@tmpdir, "\n")
+    sh(paste('mkdir -p', wf_meta@tmpdir))
     # archive logs in outdir
-    logdir <<- file.path(args$outdir, "logs")
-    cat("Analysis logs are saved to:", logdir, "\n")
-    sh(paste('mkdir -p', logdir))
-
+    wf_meta@logdir <- file.path(args$outdir, "logs")
+    cat("Analysis logs are saved to:", wf_meta@logdir, "\n")
+    sh(paste('mkdir -p', wf_meta@logdir))
+    # set outdir in wf meta
+    wf_meta@outdir <- args$outdir
+    return(wf_meta)
 }
 
 # set up input directory
-input_setup <- function (
-    file = NULL, # a vector of paths to genomes
-    tmpdir = NULL # tmp directory path where to run analysis
+setMethod("input_setup",
+signature="Workflow metadata",
+function(
+    meta,
+    args
 ) { 
     cat("Setting up analysis input directory...\n")
-    sh(paste('mkdir -p', file.path(tmpdir, "input")))
-    walk(file, function(f) {
+    sh(paste('mkdir -p', file.path(meta@tmpdir, "input")))
+    walk(args$file, function(f) {
         realpath <- file.path(normalizePath(f))
         cmd <- paste("ln -s", realpath, file.path(tmpdir, "input", basename(realpath)))
         sh(cmd, echo = T)
     })
-}
+})
 
 # cgMLST with ChewBBACA
-cgmlst <- function(
-    tmpdir = NULL, # tmp directory path where to run analysis
-    logdir = NULL, # log directory path for storing stdout and stderr
-    outdir = NULL, # output dir
-    threads = 4    # number of threads
+setMethod("cgmlst",
+signature="Workflow metadata",
+function(
+    meta,
+    args
 ) {
     cat("Running cgMLST...\n")
     cmd <- paste(
     "chewBBACA.py",
     "AlleleCall",
-    "-i", file.path(tmpdir, "input"),
+    "-i", file.path(meta@tmpdir, "input"),
     "-g $REF_PATH",
     "--ptf $TRAINING_PATH",
-    "-o", file.path(tmpdir, "cgmlst"),
+    "-o", file.path(meta@tmpdir, "cgmlst"),
     "--hash-profiles sha1",
-    "--cpu", threads,
+    "--cpu", args$threads,
     "--no-inferred",
-    ">", file.path(logdir, "chewBBACA.log"), "2>&1") # save log to file
+    ">", file.path(meta@logdir, "chewBBACA.log"), "2>&1") # save log to file
     sh(cmd, echo = T)
     
     # publish hashed and unhashed profiles in outdir
     cat("Publishing cgMLST results...\n")
-    cmd <- paste("cp -r", file.path(tmpdir, "cgmlst"),
-                 outdir)
+    cmd <- paste("cp -r", 
+                 file.path(meta@tmpdir, "cgmlst"),
+                 meta@outdir)
     sh(cmd, echo = T)
-}
+})
 
 # calculate query distance in respect to references
-cgmlst_dist_query <- function(
-    tmpdir = NULL, # tmp directory path where to run analysis
-    logdir = NULL, # log directory path for storing stdout and stderr
-    outdir = NULL # output dir
+setMethod("cgmlst_dist_query",
+signature="Workflow metadata",
+function(
+    meta,
+    args
 ) {
     cat("Calculating allelic distance between query and reference...\n")
     cmd <- paste("$CGMLST_DISTS", "-H", 
                  "$REF_ALLELES", # reference profiles
-                 file.path(tmpdir, "cgmlst", "results_alleles_hashed.tsv"), # query profiles
-                 ">", file.path(tmpdir, "cgmlst_dist.tsv")) # output distance matrix
+                 file.path(meta@tmpdir, "cgmlst", "results_alleles_hashed.tsv"), # query profiles
+                 ">", file.path(meta@tmpdir, "cgmlst_dist.tsv")) # output distance matrix
     sh(cmd, echo = T)
     # reformat distance matrix
-    dist <- fread(file.path(tmpdir, "cgmlst_dist.tsv"), sep = "\t")
+    dist <- fread(file.path(meta@tmpdir, "cgmlst_dist.tsv"), sep = "\t")
     dist_out <<- dist %>% column_to_rownames("cgmlst-dists")
     #rownames(dist_out) <- str_replace_all(rownames(dist_out), "\\.1|\\.2", "")
     #colnames(dist_out) <- str_replace_all(colnames(dist_out), "\\.1|\\.2", "")
-    write.table(dist_out, file.path(outdir, "cgmlst_dist.tsv"),
+    cat("Saving distance matrix to:", file.path(meta@outdir, "cgmlst_dist.tsv"), "\n")
+    write.table(dist_out, file.path(meta@outdir, "cgmlst_dist.tsv"),
                 sep = "\t", quote = F, row.names = T, col.names = NA)
-
-}
+})
 
 # best hit search
-bh_search <- function(
-    tmpdir = NULL # tmp directory path where to run analysis
+setMethod("bh_search",
+signature="Workflow metadata",
+function(
+    meta,
+    args
 ) {
     cat("Identifying best hit...\n")
-    bh <- apply(dist_out, 1, function(x) { names(which(x == min(x)))[1] })
+    bh <- apply(dist_out, 1, function(x) { names(which.min(x))[1] })
     # get cluster ID of the bh
     clust_path <- Sys.getenv("REF_CLUSTERS")  
     clust <- fread(clust_path, sep = "\t")
     bh_clust <- clust$clust[which(clust$id == bh)]
     bh_res <- data.frame("id" = names(bh),
                           "best_hit" = bh_clust)
-    write.table(bh_res, file.path(tmpdir, "best_hit.tsv"),
+    write.table(bh_res, file.path(meta@tmpdir, "best_hit.tsv"),
                 sep = "\t", row.names = F, quote = F)
     return(bh_res)
-}
+})
 
 # phylogenetic placement using APPLES
-pp_search <- function(
-    tmpdir = NULL, # tmp directory path where to run analysis
-    logdir = NULL, # log directory path for storing stdout and stderr
-    outdir = NULL, # output dir
-    threads = 4,   # number of threads
-    min_lr = 0.25  # minimum placement likelihood ratio
-
+setMethod("pp_search",
+signature="Workflow metadata",
+function(
+    meta,
+    args
 ) {
     cat("Running phylogenetic placement...\n")
     cmd <- paste(
         "run_apples.py", 
         "-t", "$REF_NWK", # backbone tree
-        "-d", file.path(outdir, "cgmlst_dist.tsv"), # query distance matrix
-        "-o", file.path(tmpdir, "query.jplace"), # jplace output
-        "-T", threads,
-        ">", file.path(logdir, "APPLES.log"), "2>&1" 
+        "-d", file.path(meta@outdir, "cgmlst_dist.tsv"), # query distance matrix
+        "-o", file.path(meta@tmpdir, "query.jplace"), # jplace output
+        "-T", args$threads,
+        ">", file.path(meta@logdir, "APPLES.log"), "2>&1"
     )
     sh(cmd, echo = T)
     cmd <- paste(
         "gappa", "examine", "assign",
-        "--jplace-path", file.path(tmpdir, "query.jplace"), # input jplace
+        "--jplace-path", file.path(meta@tmpdir, "query.jplace"), # input jplace
         "--taxon-file", "$REF_TAXONOMY", # input reference taxonomy
         "--allow-file-overwriting",
         "--per-query-results",
-        "--out-dir", file.path(tmpdir), # output dir
-        "--threads", threads,
-        ">", file.path(logdir, "gappa.log"), "2>&1" # write log
+        "--distant-label",
+        "--out-dir", file.path(meta@tmpdir), # output dir
+        "--threads", args$threads,
+        ">", file.path(meta@logdir, "gappa.log"), "2>&1" # write log
     )
-    #sh(cmd, echo = T)
+    sh(cmd, echo = T)
     # analyze pp results
     invalid_tax <- c("DISTANT", "enterica", "bongori", "bongori;outgroup")
-    asgmnts <- fread(file.path(tmpdir, "per_query.tsv"), sep = "\t")
-    asgmnts.val <- filter(asgmnts, LWR >= min_lr, !(taxopath %in% invalid_tax))
+    asgmnts <- fread(file.path(wf_meta@tmpdir, "per_query.tsv"), sep = "\t")
+    asgmnts.val <- filter(asgmnts, LWR >= args$min_lr, !(taxopath %in% invalid_tax))
     pp_res <- asgmnts.val %>%
         rename("id" = "name",
                "pp_clust" = "taxopath") %>%
         mutate(pp_clust = str_replace_all(pp_clust, ".*;", "")) %>%
         select(id, pp_clust)
-    write.table(pp_res, file.path(tmpdir, "pp_hit.tsv"),
+    write.table(pp_res, file.path(meta@tmpdir, "pp_hit.tsv"),
                 sep = "\t", row.names = F, quote = F)
     return(pp_res)
-}
+})
 
 # main search 
-search <- function(
-    tmpdir = NULL, # tmp directory path where to run analysis
-    logdir = NULL, # log directory path for storing stdout and stderr
-    args = NULL    # arg parameters
+setMethod("main_search",
+signature="Workflow metadata",
+function(
+    meta,
+    args
 ) {
         # run best hit
-        bh_res <- bh_search(tmpdir)
+        bh_res <- bh_search(meta, args)
         # run pp
-        pp_res <- pp_search(tmpdir, logdir, args$outdir, args$threads, args$min_lr)
+        pp_res <- pp_search(meta, args)
         # merge results
         search_res <- full_join(pp_res, bh_res, by = "id") %>%
             mutate(pp_clust = if_else(is.na(pp_clust), "NOVEL", pp_clust))
@@ -225,20 +252,22 @@ search <- function(
                              })
         search_res <- cbind(search_res, final_clust = final_preds)
         cat("Writing cluster assignment results...\n")
-        write.table(search_res, file.path(tmpdir, "samnsorter_res.tsv"),
+        write.table(search_res, file.path(meta@tmpdir, "samnsorter_res.tsv"),
                 sep = "\t", row.names = F, quote = F)
-}
+})
 
 # main workflow
 tic()
 cat("This is SamnSorter", paste0("v", version, "\n"))
-check_args(args)
+wf_meta <- new("Workflow metadata")
+wf_meta <- check_args(args)
 tmpdir <- file.path(args$outdir, "6cbdab8f")
+wf_meta@tmpdir <- tmpdir
 #tmpdir <- file.path(args$outdir, "demo", "b5329061")
-#input_setup(args$file, tmpdir)
-#cgmlst(tmpdir, logdir, args$outdir, args$threads)
-cgmlst_dist_query(tmpdir, logdir, args$outdir)
-search(tmpdir, logdir, args)
+#input_setup(wf_meta, args)
+cgmlst(wf_meta, args)
+cgmlst_dist_query(wf_meta, args)
+main_search(wf_meta, args)
 cat("Workflow completed successfully.\n")
 toc(log = T)
 
