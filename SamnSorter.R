@@ -14,7 +14,7 @@ suppressPackageStartupMessages(library(parsnip))
 
 # get version
 version <- tryCatch(
-    version <- readLines("Version"),
+    version <- readLines(box::file("Version")),
     error = function(e) {
         message("Cannot read tool version")
         q(status = 1)
