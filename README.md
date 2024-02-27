@@ -7,4 +7,4 @@
 ![docker build](https://github.com/jimmyliu1326/SamnSorter/actions/workflows/docker-img.yml/badge.svg)
 ![docker image size](https://img.shields.io/docker/image-size/jimmyliu1326/samnsorter)
 
-Fast assortment of Salmonella genomes into stable clusters
+Fast assortment of Salmonella genomes into stable clusters using phylogenetic placement and kNN classifier
