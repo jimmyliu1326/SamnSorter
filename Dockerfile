@@ -33,7 +33,7 @@ RUN git clone https://github.com/jimmyliu1326/cgmlst-dists && \
 # clone repo and add main script to PATH
 RUN cd / && \
     git clone ${GIT_REPO} && \
-    chmod +x /SamnSorter/src/SamnSorter.R && \
+    chmod +x /SamnSorter/SamnSorter.R && \
     ln -s /SamnSorter/src/SamnSorter.R ${BINARY_PATH}
     
 
