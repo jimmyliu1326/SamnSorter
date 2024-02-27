@@ -14,7 +14,7 @@ ADD ./conda.yml /
 
 # install env dependencies
 RUN apt-get update && \
-    apt-get install -y procps wget git build-essential && \
+    apt-get install -y procps wget git build-essential python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     micromamba install -n base -y -c bioconda -c conda-forge -f /conda.yml && \
     micromamba clean --all --yes && \
