@@ -7,6 +7,7 @@ ARG CONDA_DIR="/opt/conda"
 ARG GIT_REPO="https://github.com/jimmyliu1326/SamnSorter"
 ARG BINARY_PATH="/usr/local/bin/SamnSorter"
 ARG SCHEMA_URL="https://object-arbutus.cloud.computecanada.ca/cidgohshare/eagle/jimmyliu/enterobase_senterica_cgmlst_3.2.2.tar.gz"
+ARG REF_DATA="https://object-arbutus.cloud.computecanada.ca/cidgohshare/eagle/jimmyliu/SamnSorter/data/samnsorter_v1.0.tar.gz"
 
 # include env dependencies
 ADD ./conda.yml /
@@ -35,9 +36,11 @@ RUN cd / && \
     ln -s /SamnSorter/src/SamnSorter.R ${BINARY_PATH} && \
     chmod +x $BINARY_PATH
 
-# download schema
+# download reference data
 RUN wget ${SCHEMA_URL} -O /enterobase_senterica_cgmlst_3.2.2.tar.gz && \
-    tar -xzvf /enterobase_senterica_cgmlst_3.2.2.tar.gz -C /
+    tar -xzvf /enterobase_senterica_cgmlst_3.2.2.tar.gz -C / && \
+    wget ${REF_DATA} -O /ref_data.tar.gz && \
+    tar -xzvf /ref_data.tar.gz -C /SamnSorter/
 
 # set env variables for container
 ENV MODEL_DIR="/SamnSorter/models"
