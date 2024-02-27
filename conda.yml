@@ -1,3 +1,4 @@
+name: samnsorter
 channels:
   - conda-forge
   - bioconda
@@ -184,6 +185,7 @@ dependencies:
   - r-bit=4.0.5=r42h57805ef_1
   - r-bit64=4.0.5=r42h57805ef_2
   - r-blob=1.2.4=r42hc72bb7e_1
+  - r-box=1.2.0=r42h57805ef_0
   - r-brio=1.1.4=r42h57805ef_0
   - r-broom=1.0.5=r42hc72bb7e_1
   - r-bslib=0.6.1=r42hc72bb7e_0
@@ -379,3 +381,4 @@ dependencies:
   - zipp=3.17.0=pyhd8ed1ab_0
   - zlib=1.2.13=hd590300_5
   - zstd=1.5.5=hfc55251_0
+prefix: /home/jimmyliu/.conda/envs/samnsorter
