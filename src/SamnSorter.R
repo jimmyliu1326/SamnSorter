@@ -159,7 +159,8 @@ function(
     cmd <- paste("$CGMLST_DISTS", "-H", 
                  "$REF_ALLELES", # reference profiles
                  cgmlst_path, # query profiles
-                 ">", file.path(meta@tmpdir, "cgmlst_dist.tsv")) # output distance matrix
+                 ">", file.path(meta@tmpdir, "cgmlst_dist.tsv"), # output distance matrix
+                 "2>", file.path(meta@logdir, "cgmlst-dists.log"))
     sh(cmd, echo = T)
     # reformat distance matrix
     dist <- fread(file.path(meta@tmpdir, "cgmlst_dist.tsv"), sep = "\t")
@@ -362,11 +363,11 @@ tic()
 cat("This is SamnSorter", paste0("v", version, "\n"))
 wf_meta <- new("Workflow metadata")
 wf_meta <- check_args(args)
-# tmpdir <- file.path(wf_meta@outdir, "6cbdab8f")
-# wf_meta@tmpdir <- tmpdir
-input_setup(wf_meta, args)
-hashed_profiles <- cgmlst(wf_meta, args)
-# hashed_profiles <- file.path(wf_meta@tmpdir, "cgmlst", "results_alleles_hashed.tsv")
+tmpdir <- file.path(wf_meta@outdir, "6cbdab8f")
+wf_meta@tmpdir <- tmpdir
+#input_setup(wf_meta, args)
+#hashed_profiles <- cgmlst(wf_meta, args)
+hashed_profiles <- file.path(wf_meta@tmpdir, "cgmlst", "results_alleles_hashed.tsv")
 wf_meta@query_dist <- cgmlst_dist_query(wf_meta, hashed_profiles)
 main_search(wf_meta, args)
 cat("Workflow completed successfully.\n")
