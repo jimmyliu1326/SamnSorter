@@ -33,8 +33,9 @@ RUN git clone https://github.com/jimmyliu1326/cgmlst-dists && \
 # clone repo and add main script to PATH
 RUN cd / && \
     git clone ${GIT_REPO} && \
-    ln -s /SamnSorter/src/SamnSorter.R ${BINARY_PATH} && \
-    chmod +x $BINARY_PATH
+    chmod +x /SamnSorter/src/SamnSorter.R && \
+    ln -s /SamnSorter/src/SamnSorter.R ${BINARY_PATH}
+    
 
 # download reference data
 RUN wget ${SCHEMA_URL} -O /enterobase_senterica_cgmlst_3.2.2.tar.gz && \
