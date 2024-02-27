@@ -34,7 +34,7 @@ RUN git clone https://github.com/jimmyliu1326/cgmlst-dists && \
 RUN cd / && \
     git clone ${GIT_REPO} && \
     chmod +x /SamnSorter/SamnSorter.R && \
-    ln -s /SamnSorter/src/SamnSorter.R ${BINARY_PATH}
+    ln -s /SamnSorter/SamnSorter.R ${BINARY_PATH}
     
 
 # download reference data
