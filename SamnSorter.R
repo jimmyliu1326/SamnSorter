@@ -312,7 +312,7 @@ knn_search <- function(
     # kNN classification on transformed query
     query.clust <- predict(knn_model, new_data = as.data.frame(query.embed))
     # ignore predictions with lof >= min_lof
-    query.clust[which(query.lof >= min_lof)] <- "NOVEL"
+    # query.clust[which(query.lof >= min_lof)] <- "NOVEL"
     # generate output table
     knn_res <- data.frame('id' = rownames(dist),
                           'knn_clust' = query.clust$.pred_class,
@@ -454,13 +454,18 @@ function(
                    knn_clust = if_else(is.na(knn_clust), "NOVEL", knn_clust)
             )
         # final prediction by majority voting
-        final_preds <- apply(search_res[,c("best_hit", "pp_clust", "knn_clust")], 1,
+        final_preds <- apply(search_res[,c("best_hit", "pp_clust", "knn_clust", "lof_score")], 1,
                              function(x) {
-                                if (length(x) == length(unique(x))) {
+                                if (as.numeric(x[4]) >= args$min_lof) { x[3] <- "NOVEL"}
+                                # count frequency of each value
+                                tbl <- table(as.character(x[1:3]))
+                                # Check if all values are unique
+                                if (length(unique(tbl)) == 3) {
                                     return("NOVEL")
-                                } else {
-                                    return(as.character(x[which.max(table(x))]))
                                 }
+                                # if not, return the most frequent value
+                                consensus <- names(tbl)[which.max(tbl)]
+                                return(consensus)
                              })
         search_res <- cbind(search_res, final_clust = final_preds) %>%
             select(id, best_hit, pp_clust, knn_clust, final_clust, everything())
