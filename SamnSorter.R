@@ -8,9 +8,15 @@ suppressPackageStartupMessages(library(argparse))
 suppressPackageStartupMessages(library(tictoc))
 suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(uwot))
-suppressPackageStartupMessages(library(dbscan))
+# suppressPackageStartupMessages(library(dbscan))
 suppressPackageStartupMessages(library(kknn))
 suppressPackageStartupMessages(library(parsnip))
+
+# load helper funcs
+source("src/lof.R")
+
+# set global options
+options(future.rng.onMisuse = 'ignore')
 
 # get version
 version <- tryCatch(
@@ -36,6 +42,7 @@ setClass("Workflow metadata",
 invisible(setGeneric("input_setup", function(meta, args) standardGeneric("input_setup")))
 invisible(setGeneric("cgmlst", function(meta, args) standardGeneric("cgmlst")))
 invisible(setGeneric("cgmlst_dist_query", function(meta, cgmlst_path) standardGeneric("cgmlst_dist_query")))
+invisible(setGeneric("mash_dist_query", function(meta, query_path, args) standardGeneric("mash_dist_query")))
 invisible(setGeneric("main_search", function(meta, args) standardGeneric("main_search")))
 
 # cli argument parser
@@ -98,10 +105,17 @@ check_args <- function(args) {
     sh(paste('mkdir -p', wf_meta@logdir))
     # set outdir in wf meta
     wf_meta@outdir <- args$outdir
+    # set up parallel backend
+    c <- availableCores()
+    cat("Number of cores available in the environment:", c, "\n")
+    plan(multicore, workers = args$threads)
+    # return S4 object
     return(wf_meta)
 }
 
-# set up input directory
+# set up input directory under tmpdir
+# within the input directory, create symlinks 
+# to the genome files suppied to the command args
 setMethod("input_setup",
 signature="Workflow metadata",
 function(
@@ -109,12 +123,35 @@ function(
     args
 ) { 
     cat("Setting up analysis input directory...\n")
-    sh(paste('mkdir -p', file.path(meta@tmpdir, "input")))
+    input_dir <- file.path(meta@tmpdir, "input")
+    sketch_dir <- file.path(meta@tmpdir, "sketch")
+    sh(paste('mkdir -p', input_dir))
+    sh(paste('mkdir -p', sketch_dir))
     walk(args$file, function(f) {
         realpath <- file.path(normalizePath(f))
         cmd <- paste("ln -s", realpath, file.path(meta@tmpdir, "input", basename(realpath)))
         sh(cmd, echo = T)
     })
+    input_path <- file.path(meta@tmpdir, "input.txt")
+    # create a text file containing path to the symlinks line by line
+    cmd <- paste("find", normalizePath(input_dir),
+                 "-mindepth 1 -maxdepth 1 -type l",
+                 ">", input_path)
+    sh(cmd, echo = T)
+    # sketch query genomes
+    cmd <- paste("dashing", "sketch",
+                 "--nthreads", args$threads,
+                 "-P", sketch_dir,
+                 "-F", input_path)
+    sh(cmd, echo = T)
+    # create a text file containing path to the sketches line by line
+    query_path <- file.path(meta@tmpdir, "query.txt")
+    cmd <- paste("find", normalizePath(sketch_dir), 
+                 "-mindepth 1 -maxdepth 1 -type f",
+                 "-printf '%p\n'",
+                 ">", query_path)
+    sh(cmd, echo = T)
+    return(query_path)
 })
 
 # cgMLST with ChewBBACA
@@ -140,7 +177,7 @@ function(
     
     # publish hashed and unhashed profiles in outdir
     cat("Publishing cgMLST results...\n")
-    cmd <- paste("cp -r", 
+    cmd <- paste("mv", 
                  file.path(meta@tmpdir, "cgmlst"),
                  meta@outdir)
     sh(cmd, echo = T)
@@ -148,7 +185,7 @@ function(
     return(cgmlst_profile)
 })
 
-# calculate query distance in respect to references
+# calculate query cgmlst distance in respect to references
 setMethod("cgmlst_dist_query",
 signature="Workflow metadata",
 function(
@@ -174,11 +211,48 @@ function(
     return(list("mat" = dist_out, "path" = dist_out.path))
 })
 
+# calculate query mash distance in respect to references
+setMethod("mash_dist_query",
+signature="Workflow metadata",
+function(
+    meta,
+    query_path,
+    args
+) {
+    cat("Calculating mash distances between query and reference...\n")
+    cmd <- paste("dashing", "dist",
+        "-Q", query_path, # text file containing path to query genomes per line
+        "-F", "$REF_SKETCH", # path to reference sketch saved as an env variable
+        "--full-mash-dist",
+        "--presketched",
+        "--nthreads", args$threads,
+        "-O", file.path(meta@tmpdir, "dashing_dist.tsv"), # output pairwise dist matrix
+        "&>", file.path(meta@logdir, "dashing-dist.log")
+    )
+    sh(cmd, echo = T)
+    # reformat distance matrix
+    dist <- fread(file.path(meta@tmpdir, "dashing_dist.tsv"), sep = "\t")
+    # extract file ext
+    dist_out <- dist %>% 
+        mutate("##Names" = basename(`##Names`),
+               "##Names" = str_replace(`##Names`, ".w.31.spacing.10.hll", ""),
+               "##Names" = str_replace(`##Names`, "\\.[a-z]+$", "")
+               ) %>%
+        column_to_rownames("##Names")
+    colnames(dist_out) <- str_replace_all(basename(colnames(dist_out)), "\\.w.*", "")
+    dist_out.path <- file.path(meta@outdir, "dist_matrix.tsv")
+    # rownames(dist_out) <- str_replace_all(rownames(dist_out), "\\.1|\\.2", "")
+    # colnames(dist_out) <- str_replace_all(colnames(dist_out), "\\.1|\\.2", "")
+    cat("Saving distance matrix to:", dist_out.path, "\n")
+    write.table(dist_out, dist_out.path, sep = "\t", 
+                quote = F, row.names = T, col.names = NA)
+    return(list("mat" = dist_out, "path" = dist_out.path))
+})
+
 # best hit search
 bh_search <- function(
     dist # query-to-ref distance data frame
 ) {
-    cat("Identifying best hit...\n")
     bh <- apply(dist[,1:ncol(dist)-1], # drop last column to ignore outgroup
                 1, function(x) { 
         idx <- which.min(x)[1]
@@ -224,16 +298,17 @@ knn_search <- function(
 ) {
     set.seed(123)
     # compute nearest neighbour for new data
-    query.nn <- query_nn(dist[,1:ncol(dist)-1], k = 15)
+    query.nn <- query_nn(dist, k = 125)
     # transform new data into embedding
-    query.embed <- umap_transform(X = dist[,1:ncol(dist)-1],
+    query.embed <- umap_transform(X = dist,
                                   model = umap_model,
                                   nn_method = query.nn)
     # compute local outlier factor (lof) for query embedding
-    query.lof <- map_dbl(seq_along(rownames(dist)), function(x) {
-        lof(rbind(umap_model$embedding, query.embed[x,]))[nrow(umap_model$embedding)+1]
-    })
     # to detect query outliers
+    query.lof <- map_dbl(seq_along(rownames(dist)), function(x) {
+        # lof(rbind(umap_model$embedding, query.embed[x,]))[nrow(umap_model$embedding)+1]
+        lof_point(umap_model$embedding, query.embed[x,], k = 5)
+    })
     # kNN classification on transformed query
     query.clust <- predict(knn_model, new_data = as.data.frame(query.embed))
     # ignore predictions with lof >= min_lof
@@ -254,7 +329,6 @@ pp_search <- function(
     min_lr     # minimum likelihood ratio
 ) {
 
-    cat("Running phylogenetic placement...\n")
     cmd <- paste(
         "run_apples.py", 
         "-t", "$REF_NWK", # backbone tree
@@ -263,7 +337,7 @@ pp_search <- function(
         "-T", threads,
         ">", file.path(logdir, "APPLES.log"), "2>&1"
     )
-    sh(cmd, echo = T)
+    sh(cmd, echo = F)
     cmd <- paste(
         "gappa", "examine", "assign",
         "--jplace-path", file.path(tmpdir, "query.jplace"), # input jplace
@@ -275,7 +349,7 @@ pp_search <- function(
         "--threads", threads,
         ">", file.path(logdir, "gappa.log"), "2>&1" # write log
     )
-    sh(cmd, echo = T)
+    sh(cmd, echo = F)
     # analyze pp results
     invalid_tax <- c("DISTANT", "enterica", "bongori", "bongori;outgroup")
     asgmnts <- fread(file.path(tmpdir, "per_query.tsv"), sep = "\t")
@@ -306,34 +380,71 @@ function(
     meta,
     args
 ) {
+        # use implicit future to execute
+        # different search strategies in parallel
         # run best hit
-        bh_res <- bh_search(meta@query_dist$mat)
-        write.table(bh_res, file.path(meta@tmpdir, "best_hit.tsv"),
-                sep = "\t", row.names = F, quote = F)
+        cat("Identifying best hit...\n")
+        bh_res %<-% {
+            bh_search(meta@query_dist$mat)
+        }
+        bh_f <- futureOf(bh_res) # explicit future to monitor status
         # run pp
-        pp_res <- pp_search(meta@query_dist$path, 
-                            tmpdir = meta@tmpdir,
-                            logdir = meta@logdir,
-                            threads = args$threads,
-                            min_lr = args$min_lr
-        )
-        write.table(pp_res, file.path(meta@tmpdir, "pp_hit.tsv"),
-                sep = "\t", row.names = F, quote = F)
+        cat("Running phylogenetic placement...\n")
+        pp_res %<-% { 
+            pp_search(
+                meta@query_dist$path, 
+                tmpdir = meta@tmpdir,
+                logdir = meta@logdir,
+                threads = args$threads,
+                min_lr = args$min_lr
+            )
+        }
+        pp_f <- futureOf(pp_res) # explicit future to monitor status
         # run knn classification
         cat("Cluster prediction using kNN on UMAP embedding...\n")
         model_dir <- Sys.getenv("MODEL_DIR")
         # load umap model
-        umap_model <- readRDS(file.path(model_dir, "umap_k15_a1_b1_dim500_8154.RDS"))
+        umap_model <- readRDS(file.path(model_dir, "umap_dashing_k125_a1_b0.1_dim400_8154.RDS"))
         # load knn model
-        knn_model <- readRDS(file.path(model_dir,"kknn_k5_k15_a1_b1_dim500_8154.RDS"))
-        knn_res <- map_dfr(seq_along(rownames(meta@query_dist$mat)), 
+        knn_model <- readRDS(file.path(model_dir, "kknn_dashing_k5_k125_a1_b0.1_dim400_8154.RDS"))
+        # rearrange the order of the cols in distance matrix
+        # to match the order of the reference embeddings
+        sorted_mat <- meta@query_dist$mat %>%
+            select(-Outgroup) %>% # also remove query distance to outgroup
+            select(rownames(umap_model$embedding))
+        knn_res %<-% {
+            future_map_dfr(1:nrow(sorted_mat), 
                            ~knn_search(
-                                dist=meta@query_dist$mat[.,], # query-to-ref distance
+                                sorted_mat[.,], # query-to-ref distance
                                 umap_model,
                                 knn_model,
                                 args$min_lof # outlier score threshold
-                           )
-        )
+                           ),
+                           .options = furrr_options(seed = TRUE)
+            )
+        }
+        knn_f <- futureOf(knn_res) # explicit future to monitor status
+        # wait for all future sessions to resolve        
+        cat("Waiting for search strategies to complete...\n")
+        search_status = rep(0, 3)
+        while(!resolved(bh_f) | !resolved(pp_f) | !resolved(knn_f)) {
+            if (resolved(bh_f) & search_status[1] == 0) { 
+                cat("Best hit search ...DONE\n")
+                search_status[1] <- 1
+            }
+            if (resolved(pp_f) & search_status[2] == 0) { 
+                cat("Phylo placement search ...DONE\n")
+                search_status[2] <- 1
+            }
+            if (resolved(knn_f) & search_status[3] == 0) { 
+                cat("KNN search ...DONE\n")
+                search_status[3] <- 1
+            }
+        }
+        write.table(bh_res, file.path(meta@tmpdir, "best_hit.tsv"),
+                    sep = "\t", row.names = F, quote = F)
+        write.table(pp_res, file.path(meta@tmpdir, "pp_hit.tsv"),
+                    sep = "\t", row.names = F, quote = F)
         write.table(knn_res, file.path(meta@tmpdir, "knn_hit.tsv"),
                 sep = "\t", row.names = F, quote = F)
         # merge results
@@ -354,7 +465,7 @@ function(
         search_res <- cbind(search_res, final_clust = final_preds) %>%
             select(id, best_hit, pp_clust, knn_clust, final_clust, everything())
         cat("Writing cluster assignment results...\n")
-        write.table(search_res, file.path(meta@tmpdir, "samnsorter_res.tsv"),
+        write.table(search_res, file.path(meta@outdir, "samnsorter_res.tsv"),
                 sep = "\t", row.names = F, quote = F)
 })
 
@@ -364,11 +475,14 @@ cat("This is SamnSorter", paste0("v", version, "\n"))
 wf_meta <- new("Workflow metadata")
 wf_meta <- check_args(args)
 # tmpdir <- file.path(wf_meta@outdir, "6cbdab8f")
+# tmpdir <- file.path(wf_meta@outdir, "8e6e0733")
 # wf_meta@tmpdir <- tmpdir
-input_setup(wf_meta, args)
-hashed_profiles <- cgmlst(wf_meta, args)
+query <- input_setup(wf_meta, args)
+# query <- file.path(wf_meta@tmpdir, "query.txt")
+# hashed_profiles <- cgmlst(wf_meta, args)
 # hashed_profiles <- file.path(wf_meta@tmpdir, "cgmlst", "results_alleles_hashed.tsv")
-wf_meta@query_dist <- cgmlst_dist_query(wf_meta, hashed_profiles)
+# wf_meta@query_dist <- cgmlst_dist_query(wf_meta, hashed_profiles)
+wf_meta@query_dist <- mash_dist_query(wf_meta, query, args)
 main_search(wf_meta, args)
 cat("Workflow completed successfully.\n")
 toc(log = T)
