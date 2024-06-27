@@ -36,8 +36,8 @@ RUN micromamba install -n base -y -c bioconda -c conda-forge -f /SamnSorter/cond
 
 # download reference data
 RUN wget ${REF_DATA} -O /ref_data.tar.gz && \
-    # mkdir /SamnSorter/ref/ && \
-    tar -xzvf /ref_data.tar.gz --strip-components=1 -C /SamnSorter/ && \
+    mkdir /SamnSorter/ref/ && \
+    tar -xzvf /ref_data.tar.gz --strip-components=1 -C /SamnSorter/ref && \
     find /SamnSorter/ref/sketches/ -type f > /SamnSorter/ref/ref_sketch.v1.paths
     # tar -xzvf /enterobase_senterica_cgmlst_3.2.2.tar.gz -C / && \
     # wget ${SCHEMA_URL} -O /enterobase_senterica_cgmlst_3.2.2.tar.gz && \
