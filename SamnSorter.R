@@ -12,8 +12,13 @@ suppressPackageStartupMessages(library(uwot))
 suppressPackageStartupMessages(library(kknn))
 suppressPackageStartupMessages(library(parsnip))
 
+# parse the location of the executing script
+cmd_args <- commandArgs(trailingOnly = FALSE)
+file_arg <- grep("--file=", cmd_args, value = TRUE)
+src_dir <- normalizePath(dirname(sub("--file=", "", file_arg)))
+
 # load helper funcs
-source("src/lof.R", chdir = T)
+source(file.path(src_dir, "src/lof.R"))
 
 # set global options
 options(future.rng.onMisuse = 'ignore')
