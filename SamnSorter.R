@@ -232,7 +232,7 @@ function(
         "--presketched",
         "--nthreads", args$threads,
         "-O", file.path(meta@tmpdir, "dashing_dist.tsv"), # output pairwise dist matrix
-        "&>", file.path(meta@logdir, "dashing-dist.log")
+        ">", file.path(meta@logdir, "dashing-dist.log")
     )
     sh(cmd, echo = T)
     # reformat distance matrix
