@@ -1,14 +1,11 @@
 name: Docker Image CI
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  release:
+    types: [published]
   workflow_dispatch:
 
 env:
-  tag: 0.1.0
   img_name: jimmyliu1326/samnsorter
 
 concurrency:
@@ -36,4 +33,4 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: true
-          tags: ${{ env.img_name }}:latest,${{ env.img_name }}:${{ env.tag }}
+          tags: ${{ env.img_name }}:latest,${{ env.img_name }}:${{ github.event.release.tag_name }}
