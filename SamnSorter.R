@@ -13,7 +13,7 @@ suppressPackageStartupMessages(library(kknn))
 suppressPackageStartupMessages(library(parsnip))
 
 # load helper funcs
-source("src/lof.R")
+source("src/lof.R", chdir = T)
 
 # set global options
 options(future.rng.onMisuse = 'ignore')
