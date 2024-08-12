@@ -6,7 +6,7 @@ LABEL source="https://github.com/jimmyliu1326/SamnSorter"
 ARG CONDA_DIR="/opt/conda"
 ARG GIT_REPO="https://github.com/jimmyliu1326/SamnSorter"
 ARG BINARY_PATH="/usr/local/bin/SamnSorter"
-ARG REF_DATA="https://object-arbutus.cloud.computecanada.ca/cidgohshare/eagle/jimmyliu/SamnSorter/data/samnsorter_v1.1.tar.gz"
+ARG REF_DATA="https://object-arbutus.cloud.computecanada.ca/cidgohshare/eagle/jimmyliu/SamnSorter/data/samnsorter_v1.2.tar.gz"
 # ARG SCHEMA_URL="https://object-arbutus.cloud.computecanada.ca/cidgohshare/eagle/jimmyliu/enterobase_senterica_cgmlst_3.2.2.tar.gz"
 
 # install linux dependencies
@@ -46,7 +46,7 @@ RUN wget ${REF_DATA} -O /ref_data.tar.gz && \
 ENV PATH="${PATH}:/SamnSorter"
 ENV MODEL_DIR="/SamnSorter/models"
 ENV REF_CLUSTERS="/SamnSorter/ref/clusters.tsv"
-ENV REF_NWK="/SamnSorter/ref/reference.rooted.anon.nwk"
+ENV REF_NWK="/SamnSorter/ref/reference.dashing.rooted.anon.nwk"
 ENV REF_TAXONOMY="/SamnSorter/ref/taxonomy.tsv"
 ENV REF_SKETCH="/SamnSorter/ref/ref_sketch.v1.paths"
 # ENV CGMLST_DISTS="/cgmlst-dists/cgmlst-dists-query"
