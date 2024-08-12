@@ -349,7 +349,7 @@ pp_search <- function(
         "--taxon-file", "$REF_TAXONOMY", # input reference taxonomy
         "--allow-file-overwriting",
         "--per-query-results",
-        "--distant-label",
+        # "--distant-label",
         "--out-dir", tmpdir, # output dir
         "--threads", threads,
         ">", file.path(logdir, "gappa.log"), "2>&1" # write log
